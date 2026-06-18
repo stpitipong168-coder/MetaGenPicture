@@ -1,14 +1,12 @@
 """
 Detects the grid layout of an input collage image.
 
-Strategy (2-level):
-1. Find horizontal separators across the full image → horizontal bands
-2. For each band, find vertical separators independently → cells
-3. Filter out slivers (< 20% of image dimension) to exclude text overlays / watermarks
+Strategy (vertical-first 2-level):
+1. Vertical scan on full image → column boundaries
+2. Horizontal scan within each column independently → cells
 
-Relative variance threshold (% of max) catches thin separator lines without
-splitting uniform photo areas, because those areas occupy full rows/columns
-and so their contribution is already baked into the max.
+Vertical-first avoids splitting a tall left panel when right-column
+separator lines span the full image width (e.g. Facebook 1+N layouts).
 """
 
 import cv2
@@ -28,22 +26,24 @@ def detect_layout(pil_image: Image.Image) -> dict:
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY).astype(np.float32)
     h, w = gray.shape
 
-    # Minimum cell size to ignore thin banners / watermark rows
     min_cell_h = max(int(h * 0.18), 60)
     min_cell_w = max(int(w * 0.18), 60)
 
-    h_splits = _find_splits(gray, axis="horizontal", min_gap=min_cell_h)
+    # 1. Vertical scan on the full image → column boundaries
+    v_splits = _find_splits(gray, axis="vertical", min_gap=min_cell_w)
 
     cells = []
-    for i in range(len(h_splits) - 1):
-        y0, y1 = h_splits[i], h_splits[i + 1]
-        if (y1 - y0) < min_cell_h:
+    for j in range(len(v_splits) - 1):
+        x0, x1 = v_splits[j], v_splits[j + 1]
+        if (x1 - x0) < min_cell_w:
             continue
-        band = gray[y0:y1, :]
-        v_splits = _find_splits(band, axis="vertical", min_gap=min_cell_w)
-        for j in range(len(v_splits) - 1):
-            x0, x1 = v_splits[j], v_splits[j + 1]
-            if (x1 - x0) < min_cell_w:
+        col_band = gray[:, x0:x1]
+
+        # 2. Horizontal scan within this column → row boundaries
+        h_splits = _find_splits(col_band, axis="horizontal", min_gap=min_cell_h)
+        for i in range(len(h_splits) - 1):
+            y0, y1 = h_splits[i], h_splits[i + 1]
+            if (y1 - y0) < min_cell_h:
                 continue
             cells.append((x0, y0, x1, y1))
 

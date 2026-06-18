@@ -182,7 +182,7 @@ def _fit(
     excess_x = nw - target_w
     excess_y = nh - target_h
     def_l    = excess_x // 2
-    def_t    = max(0, int(excess_y * 0.25))
+    def_t    = excess_y // 2   # center crop by default
     half_ex  = excess_x // 2
 
     l = def_l + int(half_ex * x_off)

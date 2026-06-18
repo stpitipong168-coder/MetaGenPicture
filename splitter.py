@@ -12,11 +12,13 @@ import numpy as np
 from PIL import Image
 from layout_detector import detect_layout
 
-MIN_CELL_PX    = 80     # minimum cell dimension (px)
-_DARK_LUM      = 30     # luminance threshold for "dark pixel"
-_DARK_FRACTION = 0.30   # if > 30% of pixels are dark → overlay cell, skip
-_THUMB_SIZE    = (16, 16)
-_DUP_MSE_PCT   = 0.04   # normalised MSE < 4% on 16×16 thumb → duplicate
+MIN_CELL_PX     = 80    # minimum cell dimension (px)
+_DARK_LUM       = 30   # luminance threshold for "dark pixel"
+_DARK_FRACTION  = 0.30 # if > 30% pixels are very dark → overlay cell
+_OVERLAY_MEAN   = 85   # secondary: mean lum < 85 AND std < 55 → semi-transparent overlay (+8)
+_OVERLAY_STD    = 55
+_THUMB_SIZE     = (16, 16)
+_DUP_MSE_PCT    = 0.04  # normalised MSE < 4% on 16×16 thumb → duplicate
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -24,7 +26,10 @@ _DUP_MSE_PCT   = 0.04   # normalised MSE < 4% on 16×16 thumb → duplicate
 def _is_overlay(img: Image.Image) -> bool:
     """True when the cell looks like a '+N' dark-mask overlay thumbnail."""
     arr = np.array(img.convert("L"), dtype=np.uint8)
-    return float((arr < _DARK_LUM).mean()) > _DARK_FRACTION
+    if float((arr < _DARK_LUM).mean()) > _DARK_FRACTION:
+        return True
+    # Catch semi-transparent Facebook "+N" overlay: image is uniformly darkened
+    return float(arr.mean()) < _OVERLAY_MEAN and float(arr.std()) < _OVERLAY_STD
 
 
 def _thumb_rgb(img: Image.Image) -> "list[float]":
