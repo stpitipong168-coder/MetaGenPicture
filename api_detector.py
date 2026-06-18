@@ -53,6 +53,9 @@ def analyze(pil_image: Image.Image, api_key: str) -> Dict[str, List[Box]]:
         "text stamped on it — INCLUDE it as a normal tile.\n"
         "   - One box per visible tile, covering the full tile rectangle.\n"
         "   - Do NOT split one photo into pieces or merge two tiles into one.\n"
+        "   - IMPORTANT: rows can have DIFFERENT numbers of photos (e.g. 2 photos on "
+        "the top row and 3 photos on the bottom row). Look at each row separately and "
+        "count every single distinct photo — do not assume a uniform grid.\n"
         "   - Ignore thin text banners/watermarks shorter than 10% of image height.\n"
         '2. "fake_text": tight bounding box around any fake "+N" clickbait number text '
         "(e.g. '+6', '+8'). Empty array if none. Box ONLY the text glyphs, not the whole tile.\n\n"

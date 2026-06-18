@@ -164,7 +164,7 @@ if st.session_state.get("process_btn") and uploaded_files:
             vparts = generate_variant_parts(parts, layout, n=4)
             st.session_state.results[uf.name] = {
                 "src": src, "parts": parts, "gen_layout": layout,
-                "variant_parts": vparts,
+                "variant_parts": vparts, "n_detected": len(parts),
             }
             st.session_state.selected.setdefault(uf.name, 0)
         except Exception as e:
@@ -240,10 +240,15 @@ for fname, data in st.session_state.results.items():
     labels       = SLOT_LABELS.get(layout, [f"ช่อง {i+1}" for i in range(n_slots)])
     photos       = photos_base[:n_slots]
 
+    n_detected = data.get("n_detected", len(photos_base))
+    suggest    = {3: "1+2", 4: "1+3", 5: "2+3"}.get(n_detected)
+
     with st.expander(f"📄  {fname}", expanded=True):
 
-        if n_slots < needed:
-            st.warning(f"ตรวจพบ {n_slots} ภาพ / Layout {layout} ต้องการ {needed} ภาพ — ช่องที่ขาดจะเว้นว่าง")
+        if n_detected < needed:
+            st.warning(f"ตรวจพบ {n_detected} ภาพ / Layout {layout} ต้องการ {needed} ภาพ — ช่องที่ขาดจะเว้นว่าง")
+        elif n_detected > needed and suggest:
+            st.info(f"ตรวจพบ {n_detected} ภาพ แต่ Layout {layout} ใช้แค่ {needed} ภาพ — แนะนำเปลี่ยนเป็น Layout {suggest} เพื่อใช้ครบทุกภาพ")
 
         # ── Variant selector ──────────────────────────────────────────────────
         n_variants = len(vparts)
