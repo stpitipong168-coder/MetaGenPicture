@@ -7,6 +7,7 @@ Features:
 """
 import io
 import math
+import os
 import zipfile
 
 import streamlit as st
@@ -14,7 +15,7 @@ from PIL import Image, ImageDraw
 from streamlit_cropper import st_cropper
 
 from splitter import split
-from variants import generate_variants
+from variants import generate_variant_parts, LAYOUT_NEEDS
 from composer import compose, compose_direct, get_slot_layout
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -35,6 +36,20 @@ SLOT_LABELS = {
 if "layout"   not in st.session_state: st.session_state.layout   = "1+3"
 if "results"  not in st.session_state: st.session_state.results  = {}
 if "selected" not in st.session_state: st.session_state.selected = {}
+if "api_key"  not in st.session_state: st.session_state.api_key  = ""
+
+
+def _get_api_key() -> str:
+    try:
+        k = st.secrets.get("ANTHROPIC_API_KEY", "")
+        if k:
+            return k
+    except Exception:
+        pass
+    k = os.environ.get("ANTHROPIC_API_KEY", "")
+    if k:
+        return k
+    return st.session_state.api_key
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""<style>
@@ -142,13 +157,14 @@ if st.session_state.get("process_btn") and uploaded_files:
         try:
             uf.seek(0)
             src   = Image.open(uf).convert("RGB")
-            parts = split(src)
-            if len(parts) < 2:
+            parts = split(src, api_key=_get_api_key())
+            if len(parts) < 1:
                 st.warning(f"{uf.name}: ตรวจจับ sub-images ไม่ได้")
                 continue
-            vars_, vparts = generate_variants(parts, layout, n=4)
+            vparts = generate_variant_parts(parts, layout, n=4)
             st.session_state.results[uf.name] = {
-                "src": src, "variants": vars_, "variant_parts": vparts,
+                "src": src, "parts": parts, "gen_layout": layout,
+                "variant_parts": vparts,
             }
             st.session_state.selected.setdefault(uf.name, 0)
         except Exception as e:
@@ -174,6 +190,24 @@ with st.sidebar:
                 st.rerun()
             st.caption(short)
 
+    # ── API Key ───────────────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown('<p class="lbl">AI Detection</p>', unsafe_allow_html=True)
+    _ak = _get_api_key()
+    if not _ak:
+        entered = st.text_input(
+            "Anthropic API Key", type="password",
+            placeholder="sk-ant-...",
+            help="ใส่ key เพื่อให้ AI ตรวจจับรูปใน collage แม่นยำขึ้น",
+            key="_api_key_field",
+        )
+        if entered:
+            st.session_state.api_key = entered
+            st.rerun()
+        st.caption("ไม่มี key → ใช้ variance scan")
+    else:
+        st.success("AI พร้อมใช้งาน", icon="🤖")
+
     if st.session_state.results:
         st.markdown("---")
         st.markdown('<p class="lbl">ต้นฉบับ</p>', unsafe_allow_html=True)
@@ -187,22 +221,33 @@ if not st.session_state.results:
 st.markdown("---")
 all_dl: list = []
 slots_info = get_slot_layout(layout)
+needed     = LAYOUT_NEEDS.get(layout, 4)
 
 for fname, data in st.session_state.results.items():
     src: Image.Image = data["src"]
-    vars_: list      = data["variants"]
-    vparts: list     = data.get("variant_parts", [])
-    sel_idx: int     = st.session_state.selected.get(fname, 0)
-    photos_base      = vparts[sel_idx] if sel_idx < len(vparts) else []
-    n_slots          = min(len(slots_info), len(photos_base))
-    labels           = SLOT_LABELS.get(layout, [f"ช่อง {i+1}" for i in range(n_slots)])
 
-    photos = photos_base[:n_slots]
+    # ── Regenerate variant orderings if layout changed since processing ────────
+    if data.get("gen_layout") != layout and data.get("parts"):
+        vparts = generate_variant_parts(data["parts"], layout, n=4)
+        data.update({"variant_parts": vparts, "gen_layout": layout})
+        st.session_state.results[fname] = data
+        st.session_state.selected[fname] = 0
+
+    vparts: list = data.get("variant_parts", [])
+    sel_idx: int = st.session_state.selected.get(fname, 0)
+    photos_base  = vparts[sel_idx] if sel_idx < len(vparts) else []
+    n_slots      = min(len(slots_info), len(photos_base))
+    labels       = SLOT_LABELS.get(layout, [f"ช่อง {i+1}" for i in range(n_slots)])
+    photos       = photos_base[:n_slots]
 
     with st.expander(f"📄  {fname}", expanded=True):
 
+        if n_slots < needed:
+            st.warning(f"ตรวจพบ {n_slots} ภาพ / Layout {layout} ต้องการ {needed} ภาพ — ช่องที่ขาดจะเว้นว่าง")
+
         # ── Variant selector ──────────────────────────────────────────────────
-        vcols = st.columns(len(vars_), gap="small")
+        n_variants = len(vparts)
+        vcols = st.columns(max(n_variants, 1), gap="small")
         for i, vc in enumerate(vcols):
             is_sel = i == sel_idx
             with vc:
@@ -243,7 +288,6 @@ for fname, data in st.session_state.results.items():
                              if is_flipped else photo_orig)
 
                     with g_col:
-                        # ── Slot header: label | ⇄ ───────────────────────────
                         h_lbl, h_flip = st.columns([5, 1])
                         with h_lbl:
                             st.caption(labels[si])
@@ -266,14 +310,17 @@ for fname, data in st.session_state.results.items():
                         )
                         cropped[si] = result
 
-        # ── RIGHT: compose and show result ────────────────────────────────────
+        # ── RIGHT: compose fresh from current layout ──────────────────────────
         with panel_right:
             st.markdown('<p class="sec-lbl">ผลลัพธ์ — 1080 × 1080 px</p>',
                         unsafe_allow_html=True)
 
             valid = [c for c in cropped if c is not None]
-            chosen = compose_direct(valid, layout) if len(valid) == n_slots \
-                     else vars_[sel_idx]
+            if len(valid) == n_slots:
+                chosen = compose_direct(valid, layout)
+            else:
+                # Fresh compose — always uses current layout, no stale cache
+                chosen = compose(photos[:n_slots], layout=layout, respect_order=True)
 
             st.image(chosen, width="stretch")
             st.markdown(" ")

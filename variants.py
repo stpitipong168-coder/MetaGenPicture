@@ -1,67 +1,49 @@
 """
-Generates visually distinct composition variants from the same sub-images.
+Generates ordered photo lists for each variant (no pre-composing).
 
-Returns (variants, variant_parts):
-  variants       — list of 4 × 1080×1080 PIL Images (final composed)
-  variant_parts  — list of 4 × list[PIL.Image] (transformed sub-images, pre-compose)
-                   used by the UI pan/reposition feature to recompose with new offsets
+Composing is done live in app.py so layout changes always produce correct results.
 """
 
-from typing import List, Tuple
+from typing import List
 from PIL import Image
 from transformer import transform_all
-from composer import compose
 
 MAIN_AREA_THRESHOLD = 0.35
 LAYOUT_NEEDS = {"1+2": 3, "1+3": 4, "2+3": 5}
 
 
-def generate_variants(
+def generate_variant_parts(
     raw_parts: List[Image.Image],
     layout: str,
     n: int = 4,
-) -> Tuple[List[Image.Image], List[List[Image.Image]]]:
+) -> List[List[Image.Image]]:
     """
-    Returns:
-        variants      — n composed 1080×1080 images
-        variant_parts — n lists of transformed sub-images (one list per variant)
+    Returns n lists of ordered sub-images for each variant.
+    Each list has at most LAYOUT_NEEDS[layout] photos.
+    No composing — caller composes live with current layout.
     """
     total = len(raw_parts)
-    if total < 2:
-        return [], []
+    if total < 1:
+        return []
 
     areas     = [p.width * p.height for p in raw_parts]
-    max_area  = max(areas)
     area_rank = sorted(range(total), key=lambda i: areas[i], reverse=True)
 
-    main_pool = [i for i in area_rank if areas[i] >= max_area * MAIN_AREA_THRESHOLD]
-    if not main_pool:
-        main_pool = area_rank[:1]
+    # Every photo can take the main slot so each variant shows a different main.
+    # Ordered largest-first → variant 1 uses the biggest (highest quality) photo.
+    main_pool = area_rank
 
-    variants:      List[Image.Image]       = []
-    variant_parts: List[List[Image.Image]] = []
+    needed = LAYOUT_NEEDS.get(layout, 4)
+    result: List[List[Image.Image]] = []
 
     for v in range(n):
         seed     = 42 + v * 19
         main_idx = main_pool[v % len(main_pool)]
         rest     = [i for i in area_rank if i != main_idx]
-        shift    = (v // len(main_pool)) % max(1, len(rest))
+        shift    = (v // len(main_pool)) % max(1, len(rest)) if rest else 0
         rest_shifted = rest[shift:] + rest[:shift]
 
-        ordered = [raw_parts[main_idx]] + [raw_parts[i] for i in rest_shifted]
-        # Pad to fill layout slots by cycling right-column photos
-        needed = LAYOUT_NEEDS.get(layout, 4)
-        if len(rest_shifted) > 0:
-            while len(ordered) < needed:
-                fill = rest_shifted[(len(ordered) - 1) % len(rest_shifted)]
-                ordered.append(raw_parts[fill])
-        else:
-            ordered = (ordered * needed)[:needed]
+        ordered = ([raw_parts[main_idx]] + [raw_parts[i] for i in rest_shifted])[:needed]
+        result.append(transform_all(ordered, base_seed=seed))
 
-        transformed = transform_all(ordered, base_seed=seed)
-        result      = compose(transformed, layout=layout, respect_order=True)
-
-        variants.append(result)
-        variant_parts.append(transformed)
-
-    return variants, variant_parts
+    return result
