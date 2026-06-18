@@ -13,6 +13,7 @@ from transformer import transform_all
 from composer import compose
 
 MAIN_AREA_THRESHOLD = 0.35
+LAYOUT_NEEDS = {"1+2": 3, "1+3": 4, "2+3": 5}
 
 
 def generate_variants(
@@ -47,7 +48,16 @@ def generate_variants(
         shift    = (v // len(main_pool)) % max(1, len(rest))
         rest_shifted = rest[shift:] + rest[:shift]
 
-        ordered     = [raw_parts[main_idx]] + [raw_parts[i] for i in rest_shifted]
+        ordered = [raw_parts[main_idx]] + [raw_parts[i] for i in rest_shifted]
+        # Pad to fill layout slots by cycling right-column photos
+        needed = LAYOUT_NEEDS.get(layout, 4)
+        if len(rest_shifted) > 0:
+            while len(ordered) < needed:
+                fill = rest_shifted[(len(ordered) - 1) % len(rest_shifted)]
+                ordered.append(raw_parts[fill])
+        else:
+            ordered = (ordered * needed)[:needed]
+
         transformed = transform_all(ordered, base_seed=seed)
         result      = compose(transformed, layout=layout, respect_order=True)
 

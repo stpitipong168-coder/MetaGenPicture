@@ -69,7 +69,7 @@ def _left_right(
     rx          = BORDER + lw + GAP
 
     canvas = Image.new("RGB", CANVAS_SIZE, BG)
-    canvas.paste(_fit(photos[0], lw, ah, *offsets[0]), (BORDER, BORDER))
+    canvas.paste(_contain(photos[0], lw, ah), (BORDER, BORDER))
     for i, img in enumerate(photos[1:]):
         off = offsets[i + 1] if (i + 1) < len(offsets) else (0.0, 0.0)
         canvas.paste(_fit(img, rsize, rsize, *off), (rx, y0 + i * (rsize + GAP)))
@@ -97,8 +97,8 @@ def _two_three(
     rx    = BORDER + lw + GAP
 
     canvas = Image.new("RGB", CANVAS_SIZE, BG)
-    canvas.paste(_fit(photos[0], lw, lh, *offsets[0]), (BORDER, BORDER))
-    canvas.paste(_fit(photos[1], lw, lh, *offsets[1]), (BORDER, BORDER + lh + GAP))
+    canvas.paste(_contain(photos[0], lw, lh), (BORDER, BORDER))
+    canvas.paste(_contain(photos[1], lw, lh), (BORDER, BORDER + lh + GAP))
     for i, img in enumerate(photos[2:]):
         off = offsets[i + 2] if (i + 2) < len(offsets) else (0.0, 0.0)
         canvas.paste(_fit(img, rsize, rsize, *off), (rx, BORDER + i * (rsize + GAP)))
@@ -161,6 +161,18 @@ def compose_direct(
         img = crops[i].resize((w, h), Image.LANCZOS)
         canvas.paste(img, (x, y))
     return canvas
+
+
+def _contain(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
+    """Fit image within target box preserving aspect ratio; pad remainder with BG."""
+    sw, sh = img.size
+    scale  = min(target_w / sw, target_h / sh)
+    nw     = max(1, int(sw * scale))
+    nh     = max(1, int(sh * scale))
+    out    = Image.new("RGB", (target_w, target_h), BG)
+    out.paste(img.resize((nw, nh), Image.LANCZOS),
+              ((target_w - nw) // 2, (target_h - nh) // 2))
+    return out
 
 
 def _fit(
